@@ -1,4 +1,5 @@
 <script>
+  import QRCode from 'qrcode';
   import pb from '../lib/pb.js';
   import { getIsSuperuser } from '../lib/auth.svelte.js';
   import { navigate } from '../lib/router.svelte.js';
@@ -28,6 +29,8 @@
     guestCount: 0,
     message: '',
   });
+  let qrModalRsvp = $state(null);
+  let qrDataUrl = $state('');
   let newRsvp = $state({
     name: '',
     email: '',
@@ -169,6 +172,10 @@
     editRsvpError = '';
   }
 
+  function closeQrModal() {
+    qrModalRsvp = null;
+  }
+
   async function saveRsvpEdit() {
     const trimmedName = editRsvp.name.trim();
     if (!trimmedName) {
@@ -200,6 +207,30 @@
   $effect(() => {
     eventId; // track
     loadData();
+  });
+
+  $effect(() => {
+    const code = qrModalRsvp?.check_in_code;
+    if (!code) {
+      qrDataUrl = '';
+      return;
+    }
+    let cancelled = false;
+    QRCode.toDataURL(String(code), {
+      width: 280,
+      margin: 2,
+      color: { dark: '#111827', light: '#ffffff' },
+    })
+      .then((url) => {
+        if (!cancelled) qrDataUrl = url;
+      })
+      .catch((err) => {
+        console.error('QR generation failed:', err);
+        if (!cancelled) qrDataUrl = '';
+      });
+    return () => {
+      cancelled = true;
+    };
   });
 </script>
 
@@ -369,13 +400,22 @@
                 {/if}
               </td>
               <td class="px-4 py-3">
-                <div class="flex items-center gap-3">
+                <div class="flex flex-wrap items-center gap-3">
                   <button
                     onclick={() => startEditRsvp(rsvp)}
                     class="text-xs text-gray-700 hover:text-gray-900 cursor-pointer"
                   >
                     Edit
                   </button>
+                  {#if rsvp.check_in_code}
+                    <button
+                      type="button"
+                      onclick={() => (qrModalRsvp = rsvp)}
+                      class="text-xs text-gray-600 hover:text-gray-900 cursor-pointer"
+                    >
+                      Show QR
+                    </button>
+                  {/if}
                   {#if rsvp.checked_in}
                     <button
                       onclick={() => undoCheckIn(rsvp.id)}
@@ -410,6 +450,29 @@
     {#if filteredRsvps.length > 0}
       <p class="text-xs text-gray-400 mt-2">Showing {filteredRsvps.length} of {rsvps.length} RSVPs</p>
     {/if}
+
+    <Modal
+      open={!!qrModalRsvp}
+      title={qrModalRsvp ? `Check-in code — ${qrModalRsvp.name}` : 'Check-in code'}
+      onclose={closeQrModal}
+    >
+      {#if qrModalRsvp}
+        <div class="flex flex-col items-center gap-4">
+          {#if qrDataUrl}
+            <img
+              src={qrDataUrl}
+              alt="QR code for check-in"
+              class="w-64 h-64"
+              width="256"
+              height="256"
+            />
+          {:else}
+            <p class="text-sm text-gray-500">Generating QR code…</p>
+          {/if}
+          <code class="text-sm bg-gray-100 px-2 py-1 rounded">{qrModalRsvp.check_in_code}</code>
+        </div>
+      {/if}
+    </Modal>
 
     <Modal open={!!editingRsvpId} title="Edit RSVP" onclose={cancelEditRsvp}>
       <form
