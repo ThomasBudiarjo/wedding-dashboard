@@ -31,6 +31,8 @@
   });
   let qrModalRsvp = $state(null);
   let qrDataUrl = $state('');
+  let showGreeterQr = $state(false);
+  let greeterQrDataUrl = $state('');
   let newRsvp = $state({
     name: '',
     email: '',
@@ -176,6 +178,10 @@
     qrModalRsvp = null;
   }
 
+  function closeGreeterQrModal() {
+    showGreeterQr = false;
+  }
+
   async function saveRsvpEdit() {
     const trimmedName = editRsvp.name.trim();
     if (!trimmedName) {
@@ -232,6 +238,33 @@
       cancelled = true;
     };
   });
+
+  $effect(() => {
+    if (!showGreeterQr || !event?.check_in_secret) {
+      greeterQrDataUrl = '';
+      return;
+    }
+    let cancelled = false;
+    const payload = JSON.stringify({
+      secret: event.check_in_secret,
+      eventSlug: event.slug,
+    });
+    QRCode.toDataURL(payload, {
+      width: 280,
+      margin: 2,
+      color: { dark: '#111827', light: '#ffffff' },
+    })
+      .then((url) => {
+        if (!cancelled) greeterQrDataUrl = url;
+      })
+      .catch((err) => {
+        console.error('Greeter QR generation failed:', err);
+        if (!cancelled) greeterQrDataUrl = '';
+      });
+    return () => {
+      cancelled = true;
+    };
+  });
 </script>
 
 {#if loading}
@@ -246,14 +279,22 @@
         <h2 class="text-xl font-semibold text-gray-900">{event.name}</h2>
         <p class="text-sm text-gray-500">{formatDate(event.date)}</p>
       </div>
-      {#if getIsSuperuser()}
+      <div class="flex items-center gap-2">
         <button
-          onclick={() => navigate(`#/events/${eventId}/edit`)}
-          class="px-4 py-2 bg-gray-900 text-white text-sm rounded-md hover:bg-gray-800 cursor-pointer"
+          onclick={() => (showGreeterQr = true)}
+          class="px-4 py-2 border border-gray-300 text-gray-700 text-sm rounded-md hover:bg-gray-50 cursor-pointer"
         >
-          Edit Event
+          Greeter QR
         </button>
-      {/if}
+        {#if getIsSuperuser()}
+          <button
+            onclick={() => navigate(`#/events/${eventId}/edit`)}
+            class="px-4 py-2 bg-gray-900 text-white text-sm rounded-md hover:bg-gray-800 cursor-pointer"
+          >
+            Edit Event
+          </button>
+        {/if}
+      </div>
     </div>
 
     <!-- Stats -->
@@ -472,6 +513,25 @@
           <code class="text-sm bg-gray-100 px-2 py-1 rounded">{qrModalRsvp.check_in_code}</code>
         </div>
       {/if}
+    </Modal>
+
+    <Modal open={showGreeterQr} title="Greeter Check-in QR" onclose={closeGreeterQrModal}>
+      <div class="flex flex-col items-center gap-4">
+        <p class="text-sm text-gray-600 text-center">
+          Show this QR code to a greeter. They scan it with the check-in app to authenticate.
+        </p>
+        {#if greeterQrDataUrl}
+          <img
+            src={greeterQrDataUrl}
+            alt="Greeter authentication QR"
+            class="w-64 h-64"
+            width="256"
+            height="256"
+          />
+        {:else}
+          <p class="text-sm text-gray-500">Generating QR code…</p>
+        {/if}
+      </div>
     </Modal>
 
     <Modal open={!!editingRsvpId} title="Edit RSVP" onclose={cancelEditRsvp}>
