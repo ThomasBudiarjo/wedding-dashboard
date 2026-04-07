@@ -33,6 +33,7 @@
   let qrDataUrl = $state('');
   let showGreeterQr = $state(false);
   let greeterQrDataUrl = $state('');
+  let regeneratingSecret = $state(false);
   let newRsvp = $state({
     name: '',
     email: '',
@@ -180,6 +181,20 @@
 
   function closeGreeterQrModal() {
     showGreeterQr = false;
+  }
+
+  async function regenerateSecret() {
+    if (!confirm('Regenerate the greeter secret? All greeters using the current QR will be disconnected.')) return;
+    regeneratingSecret = true;
+    try {
+      const res = await pb.send(`/api/checkin/regenerate-secret/${eventId}`, { method: 'POST' });
+      event = { ...event, check_in_secret: res.check_in_secret };
+    } catch (err) {
+      console.error('Failed to regenerate secret:', err);
+      alert('Failed to regenerate secret.');
+    } finally {
+      regeneratingSecret = false;
+    }
   }
 
   async function saveRsvpEdit() {
@@ -531,6 +546,13 @@
         {:else}
           <p class="text-sm text-gray-500">Generating QR code…</p>
         {/if}
+        <button
+          onclick={regenerateSecret}
+          disabled={regeneratingSecret}
+          class="text-xs text-red-600 hover:text-red-800 cursor-pointer disabled:opacity-50"
+        >
+          {regeneratingSecret ? 'Regenerating…' : 'Regenerate secret (disconnects all greeters)'}
+        </button>
       </div>
     </Modal>
 
