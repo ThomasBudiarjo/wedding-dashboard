@@ -5,6 +5,7 @@
   import { formatDate, formatDateTime } from '../utils/helpers.js';
   import StatsCard from '../components/StatsCard.svelte';
   import Badge from '../components/Badge.svelte';
+  import Modal from '../components/Modal.svelte';
 
   let { eventId } = $props();
 
@@ -14,6 +15,26 @@
   let searchQuery = $state('');
   let filterStatus = $state('all');
   let checkingIn = $state(null);
+  let showAddRsvpForm = $state(false);
+  let creatingRsvp = $state(false);
+  let createRsvpError = $state('');
+  let editingRsvpId = $state('');
+  let savingRsvpEdit = $state(false);
+  let editRsvpError = $state('');
+  let editRsvp = $state({
+    name: '',
+    email: '',
+    attendance: 'attending',
+    guestCount: 0,
+    message: '',
+  });
+  let newRsvp = $state({
+    name: '',
+    email: '',
+    attendance: 'attending',
+    guestCount: 1,
+    message: '',
+  });
 
   let stats = $derived({
     total: rsvps.length,
@@ -90,6 +111,92 @@
     }
   }
 
+  function resetNewRsvpForm() {
+    newRsvp = {
+      name: '',
+      email: '',
+      attendance: 'attending',
+      guestCount: 1,
+      message: '',
+    };
+    createRsvpError = '';
+  }
+
+  async function addRsvpFromDashboard() {
+    const trimmedName = newRsvp.name.trim();
+    if (!trimmedName) {
+      createRsvpError = 'Name is required.';
+      return;
+    }
+
+    creatingRsvp = true;
+    createRsvpError = '';
+
+    try {
+      const created = await pb.collection('rsvps').create({
+        event: eventId,
+        name: trimmedName,
+        email: newRsvp.email.trim() || '',
+        attendance: newRsvp.attendance,
+        guest_count: newRsvp.attendance === 'attending' ? Math.max(0, Number(newRsvp.guestCount) || 0) : 0,
+        message: newRsvp.message.trim() || '',
+      });
+      rsvps = [created, ...rsvps];
+      showAddRsvpForm = false;
+      resetNewRsvpForm();
+    } catch (err) {
+      createRsvpError = err?.response?.message || 'Failed to add RSVP.';
+      console.error('Create RSVP failed:', err);
+    } finally {
+      creatingRsvp = false;
+    }
+  }
+
+  function startEditRsvp(rsvp) {
+    editingRsvpId = rsvp.id;
+    editRsvp = {
+      name: rsvp.name || '',
+      email: rsvp.email || '',
+      attendance: rsvp.attendance || 'attending',
+      guestCount: Number(rsvp.guest_count || 0),
+      message: rsvp.message || '',
+    };
+    editRsvpError = '';
+  }
+
+  function cancelEditRsvp() {
+    editingRsvpId = '';
+    editRsvpError = '';
+  }
+
+  async function saveRsvpEdit() {
+    const trimmedName = editRsvp.name.trim();
+    if (!trimmedName) {
+      editRsvpError = 'Name is required.';
+      return;
+    }
+
+    savingRsvpEdit = true;
+    editRsvpError = '';
+
+    try {
+      const updated = await pb.collection('rsvps').update(editingRsvpId, {
+        name: trimmedName,
+        email: editRsvp.email.trim() || '',
+        attendance: editRsvp.attendance,
+        guest_count: editRsvp.attendance === 'attending' ? Math.max(0, Number(editRsvp.guestCount) || 0) : 0,
+        message: editRsvp.message.trim() || '',
+      });
+      rsvps = rsvps.map(r => (r.id === editingRsvpId ? updated : r));
+      cancelEditRsvp();
+    } catch (err) {
+      editRsvpError = err?.response?.message || 'Failed to update RSVP.';
+      console.error('Update RSVP failed:', err);
+    } finally {
+      savingRsvpEdit = false;
+    }
+  }
+
   $effect(() => {
     eventId; // track
     loadData();
@@ -126,6 +233,83 @@
       <StatsCard label="Total Guests" value={stats.totalGuests} />
       <StatsCard label="Checked In" value={stats.checkedIn} sublabel="of {stats.attending} attending" />
     </div>
+
+    <div class="flex items-center justify-between mb-4 gap-3">
+      <h3 class="text-sm font-medium text-gray-700">RSVPs</h3>
+      <button
+        onclick={() => {
+          showAddRsvpForm = !showAddRsvpForm;
+          createRsvpError = '';
+        }}
+        class="px-3 py-2 bg-gray-900 text-white text-sm rounded-md hover:bg-gray-800 cursor-pointer"
+      >
+        {showAddRsvpForm ? 'Cancel' : '+ Add RSVP'}
+      </button>
+    </div>
+
+    {#if showAddRsvpForm}
+      <form
+        onsubmit={(e) => {
+          e.preventDefault();
+          addRsvpFromDashboard();
+        }}
+        class="bg-white rounded-lg border border-gray-200 p-4 mb-4 space-y-3"
+      >
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <input
+            type="text"
+            placeholder="Full name"
+            bind:value={newRsvp.name}
+            required
+            class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+          />
+          <input
+            type="email"
+            placeholder="Email (optional)"
+            bind:value={newRsvp.email}
+            class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+          />
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <select
+            bind:value={newRsvp.attendance}
+            class="px-3 py-2 border border-gray-300 rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900"
+          >
+            <option value="attending">Attending</option>
+            <option value="not_attending">Not Attending</option>
+          </select>
+
+          <input
+            type="number"
+            min="0"
+            bind:value={newRsvp.guestCount}
+            disabled={newRsvp.attendance !== 'attending'}
+            class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:bg-gray-100 disabled:text-gray-400"
+            placeholder="Guest count"
+          />
+
+          <button
+            type="submit"
+            disabled={creatingRsvp}
+            class="px-3 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 cursor-pointer disabled:opacity-50"
+          >
+            {creatingRsvp ? 'Saving...' : 'Save RSVP'}
+          </button>
+        </div>
+
+        <textarea
+          rows="3"
+          placeholder="Message (optional)"
+          bind:value={newRsvp.message}
+          class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+        ></textarea>
+
+        {#if createRsvpError}
+          <p class="text-sm text-red-600">{createRsvpError}</p>
+        {/if}
+      </form>
+    {/if}
 
     <!-- Search & Filter -->
     <div class="flex flex-col sm:flex-row gap-3 mb-4">
@@ -185,23 +369,31 @@
                 {/if}
               </td>
               <td class="px-4 py-3">
-                {#if rsvp.checked_in}
+                <div class="flex items-center gap-3">
                   <button
-                    onclick={() => undoCheckIn(rsvp.id)}
-                    disabled={checkingIn === rsvp.id}
-                    class="text-xs text-red-600 hover:text-red-800 cursor-pointer disabled:opacity-50"
+                    onclick={() => startEditRsvp(rsvp)}
+                    class="text-xs text-gray-700 hover:text-gray-900 cursor-pointer"
                   >
-                    Undo
+                    Edit
                   </button>
-                {:else}
-                  <button
-                    onclick={() => checkIn(rsvp.id)}
-                    disabled={checkingIn === rsvp.id}
-                    class="text-xs text-blue-600 hover:text-blue-800 cursor-pointer disabled:opacity-50"
-                  >
-                    {checkingIn === rsvp.id ? 'Checking in...' : 'Check In'}
-                  </button>
-                {/if}
+                  {#if rsvp.checked_in}
+                    <button
+                      onclick={() => undoCheckIn(rsvp.id)}
+                      disabled={checkingIn === rsvp.id}
+                      class="text-xs text-red-600 hover:text-red-800 cursor-pointer disabled:opacity-50"
+                    >
+                      Undo
+                    </button>
+                  {:else}
+                    <button
+                      onclick={() => checkIn(rsvp.id)}
+                      disabled={checkingIn === rsvp.id}
+                      class="text-xs text-blue-600 hover:text-blue-800 cursor-pointer disabled:opacity-50"
+                    >
+                      {checkingIn === rsvp.id ? 'Checking in...' : 'Check In'}
+                    </button>
+                  {/if}
+                </div>
               </td>
             </tr>
           {:else}
@@ -218,5 +410,77 @@
     {#if filteredRsvps.length > 0}
       <p class="text-xs text-gray-400 mt-2">Showing {filteredRsvps.length} of {rsvps.length} RSVPs</p>
     {/if}
+
+    <Modal open={!!editingRsvpId} title="Edit RSVP" onclose={cancelEditRsvp}>
+      <form
+        onsubmit={(e) => {
+          e.preventDefault();
+          saveRsvpEdit();
+        }}
+        class="space-y-3"
+      >
+        <input
+          type="text"
+          placeholder="Full name"
+          bind:value={editRsvp.name}
+          required
+          class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+        />
+
+        <input
+          type="email"
+          placeholder="Email (optional)"
+          bind:value={editRsvp.email}
+          class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+        />
+
+        <div class="grid grid-cols-2 gap-3">
+          <select
+            bind:value={editRsvp.attendance}
+            class="px-3 py-2 border border-gray-300 rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900"
+          >
+            <option value="attending">Attending</option>
+            <option value="not_attending">Not Attending</option>
+          </select>
+
+          <input
+            type="number"
+            min="0"
+            bind:value={editRsvp.guestCount}
+            disabled={editRsvp.attendance !== 'attending'}
+            class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:bg-gray-100 disabled:text-gray-400"
+            placeholder="Guest count"
+          />
+        </div>
+
+        <textarea
+          rows="3"
+          placeholder="Message (optional)"
+          bind:value={editRsvp.message}
+          class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+        ></textarea>
+
+        {#if editRsvpError}
+          <p class="text-sm text-red-600">{editRsvpError}</p>
+        {/if}
+
+        <div class="flex justify-end gap-2 pt-1">
+          <button
+            type="button"
+            onclick={cancelEditRsvp}
+            class="px-3 py-2 text-sm border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={savingRsvpEdit}
+            class="px-3 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 cursor-pointer disabled:opacity-50"
+          >
+            {savingRsvpEdit ? 'Saving...' : 'Save Changes'}
+          </button>
+        </div>
+      </form>
+    </Modal>
   </div>
 {/if}
